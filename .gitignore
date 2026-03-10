@@ -14,7 +14,7 @@ dist/
 *.egg-info/
 
 # Media/Assets
-assets/
+# assets/
 
 # Standard Python Bytecode (Highly Recommended)
 __pycache__/
