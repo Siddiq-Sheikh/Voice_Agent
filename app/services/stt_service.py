@@ -12,10 +12,16 @@ class STTService:
     def __init__(self, model_size="large-v3-turbo", device="cuda"):
         print(f">> [STT] Booting up Bare-Metal STT '{model_size}' engine...")
         
+        # --- THE FIX: Define a local project folder for the model ---
+        whisper_model_path = os.path.join(os.getcwd(), "whisper_model")
+        print(f">> [STT] Model directory set to: {whisper_model_path}")
+        
+        # Your Faster-Whisper setup with the local download_root
         self.model = WhisperModel(
             model_size, 
             device=device, 
-            compute_type="float16" if device == "cuda" else "int8"
+            compute_type="float16" if device == "cuda" else "int8",
+            download_root=whisper_model_path  # <-- This forces it to save in your project folder!
         )
         
         self.vad_model_path = "assets/silero_vad.onnx"

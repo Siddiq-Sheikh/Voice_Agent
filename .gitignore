@@ -5,6 +5,7 @@ env/
 
 # Large Model Files
 xtts_model/
+whisper_model/
 
 # Python Build/Distribution Artifacts
 voice_agent_backend.egg-info/
