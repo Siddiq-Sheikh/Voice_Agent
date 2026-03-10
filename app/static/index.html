@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice AI Agent</title>
+    <style>
+        body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #121212; color: #ffffff; }
+        #status { margin-bottom: 20px; font-size: 1.2rem; color: #888; }
+        button { padding: 15px 30px; font-size: 1.2rem; border-radius: 50px; border: none; cursor: pointer; background-color: #2e7d32; color: white; transition: background 0.3s; }
+        button.active { background-color: #d32f2f; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+
+    <h1>🧠 AI Voice Agent</h1>
+    <div id="status">Ready to connect...</div>
+    <button id="talkBtn">Start Connection</button>
+
+    <script>
+        let ws;
+        let audioContext;
+        let micStream;
+        let processor;
+        let isConnected = false;
+        
+        // --- THE FIX: Keep track of our audio playback timeline ---
+        let nextPlayTime = 0;
+
+        const btn = document.getElementById('talkBtn');
+        const status = document.getElementById('status');
+
+        btn.addEventListener('click', async () => {
+            if (isConnected) {
+                disconnect();
+            } else {
+                await connect();
+            }
+        });
+
+        async function connect() {
+            try {
+                btn.disabled = true;
+                status.innerText = "Connecting to AI...";
+
+                // 1. Setup Audio Context for Output (Speakers)
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+                nextPlayTime = 0; // Reset timeline on new connection
+
+                // 2. Connect to FastAPI WebSocket
+                ws = new WebSocket("ws://localhost:8000/api/v1/ws/voice");
+                ws.binaryType = "arraybuffer"; // We expect raw bytes from Python
+
+                ws.onopen = async () => {
+                    isConnected = true;
+                    btn.innerText = "Stop Talking";
+                    btn.classList.add("active");
+                    btn.disabled = false;
+                    status.innerText = "🟢 Connected! Speak into your microphone.";
+                    
+                    await startMicrophone();
+                };
+
+                ws.onmessage = (event) => {
+                    // Play incoming raw PCM Float32 audio from XTTS
+                    playAudioChunk(event.data);
+                };
+
+                ws.onclose = () => {
+                    disconnect();
+                    status.innerText = "🔴 Disconnected from server.";
+                };
+
+            } catch (err) {
+                console.error(err);
+                status.innerText = "❌ Error connecting to microphone or server.";
+                btn.disabled = false;
+            }
+        }
+
+        async function startMicrophone() {
+            // Get microphone access at 16kHz for Faster Whisper
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+            const source = audioContext.createMediaStreamSource(micStream);
+            
+            // Create a processor to extract raw audio data
+            processor = audioContext.createScriptProcessor(2048, 1, 1);
+            
+            processor.onaudioprocess = (e) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    
+                    // Convert Float32 to Int16 (Faster Whisper expects Int16 bytes)
+                    const int16Data = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        int16Data[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+                    }
+                    ws.send(int16Data.buffer);
+                }
+            };
+
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+        }
+
+        function playAudioChunk(arrayBuffer) {
+            // 1. Decode the raw float32 data
+            const float32Data = new Float32Array(arrayBuffer);
+            const audioBuffer = audioContext.createBuffer(1, float32Data.length, 24000);
+            audioBuffer.getChannelData(0).set(float32Data);
+
+            // 2. Create the audio source node
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+
+            // --- THE MAGIC QUEUE MATH ---
+            // If the AI took a pause and the queue ran dry, reset the timeline to "now"
+            if (nextPlayTime < audioContext.currentTime) {
+                nextPlayTime = audioContext.currentTime; 
+            }
+
+            // Schedule this chunk to play exactly when the timeline dictates
+            source.start(nextPlayTime);
+            
+            // Push the timeline forward by the exact length of this new chunk
+            nextPlayTime += audioBuffer.duration;
+        }
+
+        function disconnect() {
+            if (ws) ws.close();
+            if (processor) processor.disconnect();
+            if (micStream) micStream.getTracks().forEach(track => track.stop());
+            if (audioContext) audioContext.close();
+            
+            isConnected = false;
+            nextPlayTime = 0; // Clean up timeline
+            btn.innerText = "Start Connection";
+            btn.classList.remove("active");
+            btn.disabled = false;
+        }
+    </script>
+</body>
+</html>

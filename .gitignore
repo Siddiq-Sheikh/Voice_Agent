@@ -1,0 +1,21 @@
+# Python Virtual Environment
+.venv/
+venv/
+env/
+
+# Large Model Files
+xtts_model/
+
+# Python Build/Distribution Artifacts
+voice_agent_backend.egg-info/
+build/
+dist/
+*.egg-info/
+
+# Media/Assets
+assets/
+
+# Standard Python Bytecode (Highly Recommended)
+__pycache__/
+*.py[cod]
+*$py.class

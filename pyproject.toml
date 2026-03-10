@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-agent-backend"
+version = "0.1.0"
+description = "Real-time Voice AI Agent using FastAPI, Faster Whisper, Ollama, and XTTS v2"
+readme = "README.md"
+# Python 3.10 or 3.11 is HIGHLY recommended.
+requires-python = ">=3.10,<3.12"
+
+dependencies = [
+    # --- Core Web Framework ---
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "websockets>=12.0",
+    "pydantic-settings>=2.2.0",
+
+    # --- AI Models & Inference ---
+    "faster-whisper>=1.0.0",          
+    "TTS>=0.22.0",                    
+    "onnxruntime-gpu>=1.17.0",        
+    "httpx>=0.27.0",                  
+    "huggingface-hub>=0.22.0",        
+    "transformers>=4.46.0,<4.50.0"
+
+    # --- Math & Data ---   
+]
+
+# --- THE FIX ---
+# Tells setuptools to only package the 'app' directory and ignore 'data'
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["data*", "tests*"]
