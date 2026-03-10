@@ -4,19 +4,119 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voice AI Agent</title>
+    
+    <link rel="icon" href="data:,">
+    
     <style>
-        body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #121212; color: #ffffff; }
-        #status { margin-bottom: 20px; font-size: 1.2rem; color: #888; }
-        button { padding: 15px 30px; font-size: 1.2rem; border-radius: 50px; border: none; cursor: pointer; background-color: #2e7d32; color: white; transition: background 0.3s; }
-        button.active { background-color: #d32f2f; }
-        button:disabled { background-color: #555; cursor: not-allowed; }
+        :root {
+            /* Cyberpunk Palette */
+            --bg-color: #050a12; /* Deep blackish blue void */
+            --neon-blue: #00f2fe; /* Active listening state */
+            --neon-glow: #4facfe; /* Blue shadow glow */
+            --neon-red: #ff0055;  /* Error state */
+            --dark-ring: #1a2a40; /* Base idle state */
+            --pure-white: #ffffff; /* Hover and AI speaking state */
+        }
+
+        body { 
+            font-family: system-ui, sans-serif; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            margin: 0;
+            background-color: var(--bg-color); 
+            overflow: hidden;
+        }
+
+        /* The Round Mic Button Container (Bigger!) */
+        #talkBtn { 
+            position: relative;
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            border: 4px solid var(--dark-ring);
+            background: transparent;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            box-sizing: border-box;
+            
+            /* Basic idle glow */
+            box-shadow: 0 0 15px rgba(26, 42, 64, 0.5), inset 0 0 10px rgba(26, 42, 64, 0.3);
+        }
+
+        #talkBtn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        /* Bigger SVG Icon */
+        #micIcon {
+            width: 70px;
+            height: 70px;
+            fill: var(--dark-ring);
+            transition: all 0.3s ease;
+        }
+
+        /* --- STATE 1: Hover (Pure White) --- */
+        #talkBtn:not(.active):not(.error):not(:disabled):hover {
+            border-color: var(--pure-white);
+            box-shadow: 0 0 25px var(--pure-white), inset 0 0 15px var(--pure-white);
+        }
+        #talkBtn:not(.active):not(.error):not(:disabled):hover #micIcon {
+            fill: var(--pure-white);
+            filter: drop-shadow(0 0 8px var(--pure-white));
+        }
+
+        /* --- STATE 2: Connection Active (Neon Blue) --- */
+        #talkBtn.active {
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow);
+        }
+        #talkBtn.active #micIcon {
+            fill: var(--neon-blue);
+            filter: drop-shadow(0 0 8px var(--neon-blue));
+        }
+
+        /* --- STATE 3: Error (Neon Red) --- */
+        #talkBtn.error {
+            border-color: var(--neon-red);
+            box-shadow: 0 0 30px var(--neon-red), inset 0 0 15px var(--neon-red);
+        }
+        #talkBtn.error #micIcon {
+            fill: var(--neon-red);
+            filter: drop-shadow(0 0 8px var(--neon-red));
+        }
+
+        /* --- STATE 4: Glowing when AI Speaks (Pulsating Blue/White) --- */
+        #talkBtn.glowing {
+            animation: neonPulse 1.5s infinite;
+        }
+        @keyframes neonPulse {
+            0% { border-color: var(--neon-blue); box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow); }
+            50% { border-color: var(--pure-white); box-shadow: 0 0 60px var(--pure-white), inset 0 0 30px var(--pure-white); }
+            100% { border-color: var(--neon-blue); box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow); }
+        }
+        #talkBtn.glowing #micIcon {
+            fill: var(--pure-white);
+            filter: drop-shadow(0 0 15px var(--pure-white));
+        }
+
     </style>
 </head>
 <body>
 
-    <h1>🧠 AI Voice Agent</h1>
-    <div id="status">Ready to connect...</div>
-    <button id="talkBtn">Start Connection</button>
+    <button id="talkBtn">
+        <svg id="micIcon" viewBox="0 0 24 24">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+    </button>
 
     <script>
         let ws;
@@ -24,14 +124,15 @@
         let micStream;
         let processor;
         let isConnected = false;
-        
-        // --- THE FIX: Keep track of our audio playback timeline ---
+        let glowTimeout;
         let nextPlayTime = 0;
 
         const btn = document.getElementById('talkBtn');
-        const status = document.getElementById('status');
 
         btn.addEventListener('click', async () => {
+            // Remove error state if user tries to reconnect
+            btn.classList.remove("error"); 
+            
             if (isConnected) {
                 disconnect();
             } else {
@@ -42,102 +143,107 @@
         async function connect() {
             try {
                 btn.disabled = true;
-                status.innerText = "Connecting to AI...";
 
-                // 1. Setup Audio Context for Output (Speakers)
                 audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-                nextPlayTime = 0; // Reset timeline on new connection
+                nextPlayTime = 0; 
 
-                // 2. Connect to FastAPI WebSocket
                 ws = new WebSocket("ws://localhost:8000/api/v1/ws/voice");
-                ws.binaryType = "arraybuffer"; // We expect raw bytes from Python
+                ws.binaryType = "arraybuffer"; 
 
                 ws.onopen = async () => {
                     isConnected = true;
-                    btn.innerText = "Stop Talking";
-                    btn.classList.add("active");
+                    btn.classList.add("active"); // Turns it Neon Blue!
                     btn.disabled = false;
-                    status.innerText = "🟢 Connected! Speak into your microphone.";
-                    
                     await startMicrophone();
                 };
 
                 ws.onmessage = (event) => {
-                    // Play incoming raw PCM Float32 audio from XTTS
                     playAudioChunk(event.data);
                 };
 
-                ws.onclose = () => {
+                ws.onclose = (event) => {
                     disconnect();
-                    status.innerText = "🔴 Disconnected from server.";
+                    // If the close wasn't a normal user disconnect (code 1000/1001), flash red!
+                    if (event.code !== 1000 && event.code !== 1001) {
+                        btn.classList.add("error");
+                    }
                 };
 
             } catch (err) {
-                console.error(err);
-                status.innerText = "❌ Error connecting to microphone or server.";
-                btn.disabled = false;
+                console.error("Connection failed:", err);
+                disconnect();
+                btn.classList.add("error"); // Turns it Neon Red on failure!
             }
         }
 
         async function startMicrophone() {
-            // Get microphone access at 16kHz for Faster Whisper
-            micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
-            const source = audioContext.createMediaStreamSource(micStream);
-            
-            // Create a processor to extract raw audio data
-            processor = audioContext.createScriptProcessor(2048, 1, 1);
-            
-            processor.onaudioprocess = (e) => {
-                if (ws.readyState === WebSocket.OPEN) {
-                    const inputData = e.inputBuffer.getChannelData(0);
-                    
-                    // Convert Float32 to Int16 (Faster Whisper expects Int16 bytes)
-                    const int16Data = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        int16Data[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+            try {
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+                const source = audioContext.createMediaStreamSource(micStream);
+                
+                processor = audioContext.createScriptProcessor(2048, 1, 1);
+                
+                processor.onaudioprocess = (e) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const int16Data = new Int16Array(inputData.length);
+                        for (let i = 0; i < inputData.length; i++) {
+                            int16Data[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+                        }
+                        ws.send(int16Data.buffer);
                     }
-                    ws.send(int16Data.buffer);
-                }
-            };
+                };
 
-            source.connect(processor);
-            processor.connect(audioContext.destination);
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+            } catch (err) {
+                console.error("Microphone access denied:", err);
+                disconnect();
+                btn.classList.add("error");
+            }
         }
 
         function playAudioChunk(arrayBuffer) {
-            // 1. Decode the raw float32 data
             const float32Data = new Float32Array(arrayBuffer);
             const audioBuffer = audioContext.createBuffer(1, float32Data.length, 24000);
             audioBuffer.getChannelData(0).set(float32Data);
 
-            // 2. Create the audio source node
             const source = audioContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(audioContext.destination);
 
-            // --- THE MAGIC QUEUE MATH ---
-            // If the AI took a pause and the queue ran dry, reset the timeline to "now"
             if (nextPlayTime < audioContext.currentTime) {
                 nextPlayTime = audioContext.currentTime; 
             }
 
-            // Schedule this chunk to play exactly when the timeline dictates
             source.start(nextPlayTime);
             
-            // Push the timeline forward by the exact length of this new chunk
+            // Visual Glow Logic (AI Speaking)
+            btn.classList.add("glowing");
+
+            const durationMs = audioBuffer.duration * 1000;
+            const delayUntilFinished = (nextPlayTime - audioContext.currentTime) * 1000 + durationMs;
+
+            clearTimeout(glowTimeout);
+            glowTimeout = setTimeout(() => {
+                btn.classList.remove("glowing");
+            }, delayUntilFinished);
+
             nextPlayTime += audioBuffer.duration;
         }
 
         function disconnect() {
-            if (ws) ws.close();
+            clearTimeout(glowTimeout);
+            btn.classList.remove("glowing");
+            btn.classList.remove("active");
+
+            if (ws) ws.close(1000); // 1000 = Normal closure
             if (processor) processor.disconnect();
             if (micStream) micStream.getTracks().forEach(track => track.stop());
-            if (audioContext) audioContext.close();
+            if (audioContext && audioContext.state !== 'closed') audioContext.close();
             
             isConnected = false;
-            nextPlayTime = 0; // Clean up timeline
-            btn.innerText = "Start Connection";
-            btn.classList.remove("active");
+            nextPlayTime = 0; 
             btn.disabled = false;
         }
     </script>
