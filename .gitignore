@@ -3,6 +3,9 @@
 venv/
 env/
 
+# Dot ENV
+.env/
+
 .vscode/
 
 # Large Model Files

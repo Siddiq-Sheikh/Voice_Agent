@@ -25,7 +25,9 @@ dependencies = [
     "huggingface-hub>=0.22.0",        
     "transformers>=4.46.0,<4.50.0"
 
-    # --- Math & Data ---   
+    # --- DB (SQL) ---
+    "asyncio"
+    "asyncpg"   
 ]
 
 # --- THE FIX ---

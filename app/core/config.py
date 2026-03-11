@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     tts_speaker_ref_path: str = "assets/speaker_ref.wav"
     tts_device: str = "cuda"
 
+    # --- DATABASE SETTINGS ---
+    db_user: str = "postgres"
+    db_password: str  # <-- No default value. It MUST be in the .env file!
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "postgres"
+
     # This tells Pydantic to look for the .env file in the root directory
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
