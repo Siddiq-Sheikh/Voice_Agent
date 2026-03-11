@@ -1,7 +1,8 @@
 # Python Virtual Environment
+.env
 .venv/
 venv/
-env/
+.env/
 
 .vscode/
 
