@@ -7,38 +7,35 @@ import numpy as np
 import onnxruntime as ort
 from faster_whisper import WhisperModel
 import asyncio
+from app.core.logger import log
 
 class STTService:
     def __init__(self, model_size="large-v3", device="cuda"):
-        print(f">> [STT] Booting up Bare-Metal STT '{model_size}' engine...")
+        log.info(f"[STT] Booting up Bare-Metal STT '{model_size}' engine...")
         
-        # --- THE FIX: Define a local project folder for the model ---
         whisper_model_path = os.path.join(os.getcwd(), "whisper_model")
-        print(f">> [STT] Model directory set to: {whisper_model_path}")
+        log.debug(f"[STT] Model directory set to: {whisper_model_path}")
         
-        # Your Faster-Whisper setup with the local download_root
         self.model = WhisperModel(
             model_size, 
             device=device, 
             compute_type="float16" if device == "cuda" else "int8",
-            download_root=whisper_model_path  # <-- This forces it to save in your project folder!
+            download_root=whisper_model_path
         )
         
         self.vad_model_path = "assets/silero_vad.onnx"
         if not os.path.exists(self.vad_model_path):
-            print(">> ❌ [VAD ERROR] 'silero_vad.onnx' not found in assets folder!")
+            log.error("[VAD ERROR] 'silero_vad.onnx' not found in assets folder!")
             
-        print(">> [VAD] Loading your official Silero VAD ONNX model...")
+        log.info("[VAD] Loading your official Silero VAD ONNX model...")
         self.vad_session = ort.InferenceSession(self.vad_model_path, providers=['CPUExecutionProvider'])
         
-        # YOUR EXACT STATES
         self._vad_state = np.zeros((2, 1, 128), dtype=np.float32)
         self._vad_context = np.zeros((1, 64), dtype=np.float32)
         
-        self.incoming_ws_queue = queue.Queue() 
+        # Renamed from ws_queue to audio_queue for WebRTC
+        self.incoming_audio_queue = queue.Queue() 
         self.audio_queue = queue.Queue()       
-        
-        # --- THE MISSING BUFFER FIX ---
         self.vad_chunk_buffer = bytearray()
         
         self.is_listening = True
@@ -48,40 +45,32 @@ class STTService:
         self.audio_thread.start()
 
     def _vad_worker(self):
-        """Your exact blood-and-tears VAD loop, processing the Web Stream."""
         pre_speech_buffer = collections.deque(maxlen=15) 
         recording_buffer = []
-        
         is_recording = False
         silence_counter = 0
         sr_tensor = np.array(16000, dtype=np.int64)
         
-        print(">> 🟢 STT Worker Thread Active. Processing WebSocket stream...")
+        log.info("🟢 [STT] Worker Thread Active. Processing audio stream...")
         
         while self.is_listening:
             try:
-                # Get the perfectly sized 1024-byte chunk
-                raw_bytes = self.incoming_ws_queue.get(timeout=0.5)
+                raw_bytes = self.incoming_audio_queue.get(timeout=0.5)
                 audio_array = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                 
-                # --- YOUR EXACT VOLUME CALC ---
                 current_volume = float(np.max(np.abs(audio_array)))
-                
-                # --- YOUR EXACT PARAMETERS ---
                 chunk_with_context = np.concatenate([self._vad_context, audio_array.reshape(1, -1)], axis=1)
                 
-                ort_inputs = {
-                    "input": chunk_with_context, 
-                    "sr": sr_tensor, 
-                    "state": self._vad_state
-                }
-                
+                ort_inputs = {"input": chunk_with_context, "sr": sr_tensor, "state": self._vad_state}
                 out, self._vad_state = self.vad_session.run(None, ort_inputs)
+                
                 prob_val = float(np.max(out))
                 self._vad_context = chunk_with_context[:, -64:]
+
+                if prob_val > 0.6:
+                    log.debug(f"📊 [VAD Radar] Prob: {prob_val:.2f} | Volume: {current_volume:.3f}")
                 
-                # --- YOUR EXACT DUAL-GATE (0.85 Prob / 0.4 Vol) ---
-                if prob_val > 0.85 and current_volume > 0.3: 
+                if prob_val > 0.85 and current_volume > 0.02: 
                     if not is_recording:
                         is_recording = True
                         recording_buffer = list(pre_speech_buffer)
@@ -96,7 +85,6 @@ class STTService:
                         
                         if silence_counter > 20: 
                             is_recording = False
-                            
                             if not self.is_paused:
                                 full_audio = b"".join(recording_buffer)
                                 self.audio_queue.put(full_audio)
@@ -110,16 +98,15 @@ class STTService:
             except queue.Empty:
                 continue
             except Exception as e:
-                print(f">> [Audio Worker Error]: {e}")
+                log.error(f"[Audio Worker Error]: {e}")
 
     async def transcribe_chunk(self, audio_bytes: bytes) -> str:
-        # --- THE FIX: SLICE BROWSER CHUNKS INTO PERFECT 1024-BYTE BITES ---
         self.vad_chunk_buffer.extend(audio_bytes)
         
         while len(self.vad_chunk_buffer) >= 1024:
             exact_chunk = self.vad_chunk_buffer[:1024]
             self.vad_chunk_buffer = self.vad_chunk_buffer[1024:]
-            self.incoming_ws_queue.put(exact_chunk)
+            self.incoming_audio_queue.put(exact_chunk)
             
         if not self.audio_queue.empty():
             full_audio_bytes = self.audio_queue.get()
@@ -147,18 +134,9 @@ class STTService:
         text = " ".join([seg.text for seg in segments]).strip()
         
         clean_text = text.lower().strip(" .!?*-_")
-        ghost_phrases = [
-            "you", "bye", "thanks", "subscribe", "thank you", 
-            "amara.org", "i'm going to go to bed now",
-            "blank_audio", "silence", "speaking in foreign language"
-        ]
+        ghost_phrases = ["you", "bye", "thanks", "subscribe", "thank you", "amara.org", "i'm going to go to bed now", "blank_audio", "silence", "speaking in foreign language"]
         
-        is_system_tag = (
-            (clean_text.startswith("[") and clean_text.endswith("]")) or
-            (clean_text.startswith("(") and clean_text.endswith(")")) or
-            (clean_text.startswith("*") and clean_text.endswith("*")) or
-            (clean_text.startswith("-") and clean_text.endswith("-"))
-        )
+        is_system_tag = ((clean_text.startswith("[") and clean_text.endswith("]")) or (clean_text.startswith("(") and clean_text.endswith(")")) or (clean_text.startswith("*") and clean_text.endswith("*")) or (clean_text.startswith("-") and clean_text.endswith("-")))
         
         if clean_text in ghost_phrases or is_system_tag:
             text = ""
@@ -167,8 +145,8 @@ class STTService:
         total_time = (time.perf_counter() - start_total) * 1000
         
         if text:
-            print(f"\n   [STT Latency] Format: {t_format:.2f}ms | Transcribe: {t_transcribe:.2f}ms | Filter: {t_process:.2f}ms | Total: {total_time:.2f}ms")
-            print(f">> [STT] Recognized: {text}")
+            log.debug(f"[STT Latency] Format: {t_format:.2f}ms | Transcribe: {t_transcribe:.2f}ms | Filter: {t_process:.2f}ms | Total: {total_time:.2f}ms")
+            log.info(f"🗣️  You: {text}")
             return text
             
         return ""

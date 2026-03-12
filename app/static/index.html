@@ -1,251 +1,58 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice AI Agent</title>
-    
-    <link rel="icon" href="data:,">
-    
+    <title>WebRTC Voice AI</title>
     <style>
-        :root {
-            /* Cyberpunk Palette */
-            --bg-color: #050a12; /* Deep blackish blue void */
-            --neon-blue: #00f2fe; /* Active listening state */
-            --neon-glow: #4facfe; /* Blue shadow glow */
-            --neon-red: #ff0055;  /* Error state */
-            --dark-ring: #1a2a40; /* Base idle state */
-            --pure-white: #ffffff; /* Hover and AI speaking state */
-        }
-
-        body { 
-            font-family: system-ui, sans-serif; 
-            display: flex; 
-            align-items: center; 
-            justify-content: center; 
-            height: 100vh; 
-            margin: 0;
-            background-color: var(--bg-color); 
-            overflow: hidden;
-        }
-
-        /* The Round Mic Button Container (Bigger!) */
-        #talkBtn { 
-            position: relative;
-            width: 150px;
-            height: 150px;
-            border-radius: 50%;
-            border: 4px solid var(--dark-ring);
-            background: transparent;
-            cursor: pointer;
-            outline: none;
-            transition: all 0.3s ease-out;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            box-sizing: border-box;
-            
-            /* Basic idle glow */
-            box-shadow: 0 0 15px rgba(26, 42, 64, 0.5), inset 0 0 10px rgba(26, 42, 64, 0.3);
-        }
-
-        #talkBtn:disabled {
-            opacity: 0.3;
-            cursor: not-allowed;
-        }
-
-        /* Bigger SVG Icon */
-        #micIcon {
-            width: 70px;
-            height: 70px;
-            fill: var(--dark-ring);
-            transition: all 0.3s ease;
-        }
-
-        /* --- STATE 1: Hover (Pure White) --- */
-        #talkBtn:not(.active):not(.error):not(:disabled):hover {
-            border-color: var(--pure-white);
-            box-shadow: 0 0 25px var(--pure-white), inset 0 0 15px var(--pure-white);
-        }
-        #talkBtn:not(.active):not(.error):not(:disabled):hover #micIcon {
-            fill: var(--pure-white);
-            filter: drop-shadow(0 0 8px var(--pure-white));
-        }
-
-        /* --- STATE 2: Connection Active (Neon Blue) --- */
-        #talkBtn.active {
-            border-color: var(--neon-blue);
-            box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow);
-        }
-        #talkBtn.active #micIcon {
-            fill: var(--neon-blue);
-            filter: drop-shadow(0 0 8px var(--neon-blue));
-        }
-
-        /* --- STATE 3: Error (Neon Red) --- */
-        #talkBtn.error {
-            border-color: var(--neon-red);
-            box-shadow: 0 0 30px var(--neon-red), inset 0 0 15px var(--neon-red);
-        }
-        #talkBtn.error #micIcon {
-            fill: var(--neon-red);
-            filter: drop-shadow(0 0 8px var(--neon-red));
-        }
-
-        /* --- STATE 4: Glowing when AI Speaks (Pulsating Blue/White) --- */
-        #talkBtn.glowing {
-            animation: neonPulse 1.5s infinite;
-        }
-        @keyframes neonPulse {
-            0% { border-color: var(--neon-blue); box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow); }
-            50% { border-color: var(--pure-white); box-shadow: 0 0 60px var(--pure-white), inset 0 0 30px var(--pure-white); }
-            100% { border-color: var(--neon-blue); box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow); }
-        }
-        #talkBtn.glowing #micIcon {
-            fill: var(--pure-white);
-            filter: drop-shadow(0 0 15px var(--pure-white));
-        }
-
+        body { background: #121212; color: #00ffcc; font-family: sans-serif; text-align: center; padding: 50px; }
+        button { padding: 15px 30px; font-size: 18px; background: #00ffcc; border: none; cursor: pointer; font-weight: bold;}
     </style>
 </head>
 <body>
-
-    <button id="talkBtn">
-        <svg id="micIcon" viewBox="0 0 24 24">
-            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-        </svg>
-    </button>
+    <h1>J.A.R.V.I.S. WebRTC Uplink</h1>
+    <button id="startBtn">Initialize Connection</button>
+    <audio id="aiAudio" autoplay></audio>
 
     <script>
-        let ws;
-        let audioContext;
-        let micStream;
-        let processor;
-        let isConnected = false;
-        let glowTimeout;
-        let nextPlayTime = 0;
-
-        const btn = document.getElementById('talkBtn');
-
-        btn.addEventListener('click', async () => {
-            // Remove error state if user tries to reconnect
-            btn.classList.remove("error"); 
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            const pc = new RTCPeerConnection();
             
-            if (isConnected) {
-                disconnect();
-            } else {
-                await connect();
+            // 1. Listen for the AI's audio track coming from FastAPI
+            pc.ontrack = (event) => {
+                console.log("Audio track received from AI!");
+                document.getElementById('aiAudio').srcObject = event.streams[0];
+            };
+
+            try {
+                // 2. Capture your microphone
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+                // 3. Create the WebRTC Offer
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // 4. Send the offer to FastAPI
+                const response = await fetch('/api/v1/webrtc/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sdp: pc.localDescription.sdp,
+                        type: pc.localDescription.type
+                    })
+                });
+
+                // 5. Receive the answer and finalize the connection
+                const answer = await response.json();
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                
+                document.getElementById('startBtn').innerText = "Connected & Listening...";
+                document.getElementById('startBtn').style.background = "#00ff00";
+
+            } catch (err) {
+                console.error("WebRTC Error:", err);
+                alert("Failed to connect to AI. Check console.");
             }
         });
-
-        async function connect() {
-            try {
-                btn.disabled = true;
-
-                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-                nextPlayTime = 0; 
-
-                ws = new WebSocket("ws://localhost:8000/api/v1/ws/voice");
-                ws.binaryType = "arraybuffer"; 
-
-                ws.onopen = async () => {
-                    isConnected = true;
-                    btn.classList.add("active"); // Turns it Neon Blue!
-                    btn.disabled = false;
-                    await startMicrophone();
-                };
-
-                ws.onmessage = (event) => {
-                    playAudioChunk(event.data);
-                };
-
-                ws.onclose = (event) => {
-                    disconnect();
-                    // If the close wasn't a normal user disconnect (code 1000/1001), flash red!
-                    if (event.code !== 1000 && event.code !== 1001) {
-                        btn.classList.add("error");
-                    }
-                };
-
-            } catch (err) {
-                console.error("Connection failed:", err);
-                disconnect();
-                btn.classList.add("error"); // Turns it Neon Red on failure!
-            }
-        }
-
-        async function startMicrophone() {
-            try {
-                micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
-                const source = audioContext.createMediaStreamSource(micStream);
-                
-                processor = audioContext.createScriptProcessor(2048, 1, 1);
-                
-                processor.onaudioprocess = (e) => {
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        const inputData = e.inputBuffer.getChannelData(0);
-                        const int16Data = new Int16Array(inputData.length);
-                        for (let i = 0; i < inputData.length; i++) {
-                            int16Data[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-                        }
-                        ws.send(int16Data.buffer);
-                    }
-                };
-
-                source.connect(processor);
-                processor.connect(audioContext.destination);
-            } catch (err) {
-                console.error("Microphone access denied:", err);
-                disconnect();
-                btn.classList.add("error");
-            }
-        }
-
-        function playAudioChunk(arrayBuffer) {
-            const float32Data = new Float32Array(arrayBuffer);
-            const audioBuffer = audioContext.createBuffer(1, float32Data.length, 24000);
-            audioBuffer.getChannelData(0).set(float32Data);
-
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
-
-            if (nextPlayTime < audioContext.currentTime) {
-                nextPlayTime = audioContext.currentTime; 
-            }
-
-            source.start(nextPlayTime);
-            
-            // Visual Glow Logic (AI Speaking)
-            btn.classList.add("glowing");
-
-            const durationMs = audioBuffer.duration * 1000;
-            const delayUntilFinished = (nextPlayTime - audioContext.currentTime) * 1000 + durationMs;
-
-            clearTimeout(glowTimeout);
-            glowTimeout = setTimeout(() => {
-                btn.classList.remove("glowing");
-            }, delayUntilFinished);
-
-            nextPlayTime += audioBuffer.duration;
-        }
-
-        function disconnect() {
-            clearTimeout(glowTimeout);
-            btn.classList.remove("glowing");
-            btn.classList.remove("active");
-
-            if (ws) ws.close(1000); // 1000 = Normal closure
-            if (processor) processor.disconnect();
-            if (micStream) micStream.getTracks().forEach(track => track.stop());
-            if (audioContext && audioContext.state !== 'closed') audioContext.close();
-            
-            isConnected = false;
-            nextPlayTime = 0; 
-            btn.disabled = false;
-        }
     </script>
 </body>
 </html>

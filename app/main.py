@@ -1,42 +1,44 @@
-import torch
+# --- THE FIX: THIS MUST BE LINE 1 ---
+import torch  
 
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.logger import log
+from app.api.webrtc import router as webrtc_router
 
-# Import Services
+# Import your heavy ML services
+from app.services.stt import STTService
+from app.services.llm import LLMService
+from app.services.tts import TTSService
+
 from fastapi.staticfiles import StaticFiles
-from app.services.stt_service import STTService
-from app.services.llm_service import LLMService
-from app.services.tts_service import TTSService
-
-# Import Router
-from app.api.v1.router import api_router
-
-# Global dictionary to hold our heavy AI models in VRAM
-models = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("\n" + "="*55 + "\n 🚀 INITIALIZING AI PIPELINE \n" + "="*55)
-    
-    # Load models
-    models["tts"] = TTSService()
-    models["stt"] = STTService()
-    models["llm"] = LLMService()
-    
-    # --- THE MISSING LINK ---
-    # Attach the loaded dictionary to FastAPI's internal state
-    # so the WebSocket router can actually find them!
-    app.state.models = models
-    
+    log.info("🚀 INITIALIZING AI PIPELINE...")
+
+    # Load the models straight into VRAM
+    stt = STTService()
+    llm = LLMService()
+    tts = TTSService()
+
+    # Store them globally so your WebRTC router can grab them instantly
+    app.state.models = {
+        "stt": stt,
+        "llm": llm,
+        "tts": tts
+    }
+
+    log.info("✅ Pipeline Ready. Listening for UDP connections.")
     yield
-    
-    print("\n🛑 Shutting down AI engines...")
-    models.clear()
 
-app = FastAPI(lifespan=lifespan, title="Voice AI Agent API")
+    log.info("🛑 Shutting down AI models...")
+    stt.is_listening = False # Safely kill the VAD thread
 
+app = FastAPI(title="WebRTC Voice Agent", lifespan=lifespan)
+
+# Mandatory for WebRTC browser connections
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -45,10 +47,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 1. REGISTER THE API ROUTER FIRST
-# This ensures WebSocket traffic gets routed to your Python code safely.
-app.include_router(api_router, prefix="/api/v1")
+# Mount the signaling endpoint
+app.include_router(webrtc_router, prefix="/api/v1")
 
-# 2. MOUNT STATIC FILES LAST
-# This acts as a catch-all for your frontend HTML, CSS, and JS.
+# --- THE FIX: SERVE THE FRONTEND ---
 app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "online", "system": "nominal"}
