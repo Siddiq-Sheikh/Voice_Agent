@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from aiortc import RTCPeerConnection, RTCSessionDescription
-from app.services.webrtc_agent import WebRTCAgent
+from app.services.agent import WebRTCAgent
 
 api_router = APIRouter()
 
