@@ -11,7 +11,7 @@ class VoiceAgent:
         self.tts = tts
 
         # --- GLOBAL FLAGS ---
-        self.allow_interrupt = True   
+        self.allow_interrupt = False   
         self.is_interrupted = False 
         self.is_speaking = False 
         

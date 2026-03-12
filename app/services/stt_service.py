@@ -9,7 +9,7 @@ from faster_whisper import WhisperModel
 import asyncio
 
 class STTService:
-    def __init__(self, model_size="large-v3-turbo", device="cuda"):
+    def __init__(self, model_size="large-v3", device="cuda"):
         print(f">> [STT] Booting up Bare-Metal STT '{model_size}' engine...")
         
         # --- THE FIX: Define a local project folder for the model ---
@@ -81,7 +81,7 @@ class STTService:
                 self._vad_context = chunk_with_context[:, -64:]
                 
                 # --- YOUR EXACT DUAL-GATE (0.85 Prob / 0.4 Vol) ---
-                if prob_val > 0.85 and current_volume > 0.2: 
+                if prob_val > 0.85 and current_volume > 0.3: 
                     if not is_recording:
                         is_recording = True
                         recording_buffer = list(pre_speech_buffer)
@@ -140,7 +140,7 @@ class STTService:
         t_format = (time.perf_counter() - t_format_start) * 1000
         
         t_transcribe_start = time.perf_counter()
-        segments, _ = self.model.transcribe(audio_array, beam_size=1, language="en")
+        segments, _ = self.model.transcribe(audio_array, beam_size=5, language="en")
         t_transcribe = (time.perf_counter() - t_transcribe_start) * 1000
         
         t_process_start = time.perf_counter()
