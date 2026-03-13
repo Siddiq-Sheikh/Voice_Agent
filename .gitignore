@@ -3,25 +3,36 @@
 venv/
 env/
 
-# Dot ENV
-.env/
+# Environment Secrets (CRITICAL)
+.env
+.env.local
+.env.*
+!.env.example
 
+# Editor Settings
 .vscode/
+.idea/
 
-# Large Model Files
+# Large AI Model Directories
 xtts_model/
 whisper_model/
+assets/piper/
+*.onnx
+*.pth
+*.bin
 
 # Python Build/Distribution Artifacts
 voice_agent_backend.egg-info/
 build/
 dist/
 *.egg-info/
-
-# Media/Assets
-# assets/
-
-# Standard Python Bytecode (Highly Recommended)
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Logs
+*.log
+
+# OS Specific
+Thumbs.db
+ds_store
