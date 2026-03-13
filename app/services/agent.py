@@ -116,10 +116,10 @@
 #         while not self.audio_out_queue.empty():
 #             self.audio_out_queue.get_nowait()
 #             self.audio_out_queue.task_done()
-
 import asyncio
 import time
 import torch
+import json # <-- Added for UI communication
 from typing import AsyncGenerator
 from app.core.config import settings
 
@@ -131,7 +131,6 @@ class VoiceAgent:
         self.tts = tts
 
         # --- DEVICE DETECTION ---
-        # Checks if a CUDA-enabled GPU is present
         self.has_gpu = torch.cuda.is_available()
         
         if self.has_gpu:
@@ -156,8 +155,6 @@ class VoiceAgent:
         try:
             async for message in websocket.iter_bytes():
                 # 1. Feed STT 
-                # On Laptop: Uses Groq Whisper-Large
-                # On PC: Uses Local STT model
                 user_text = await self.stt.transcribe_chunk(message, use_groq=not self.has_gpu)
                 
                 if user_text:
@@ -166,11 +163,13 @@ class VoiceAgent:
                         await self.interrupt_agent()
                     
                     print(f"🗣️ You: {user_text}")
+                    
+                    # --- NEW: Send User Text to UI ---
+                    await websocket.send_text(json.dumps({"type": "user", "text": user_text}))
+                    
                     self.is_interrupted = False
                     
                     # 2. LLM Generation
-                    # On Laptop: Uses Groq Qwen-7B
-                    # On PC: Uses Local LLM
                     word_stream = self.llm.generate_response_stream(
                         user_text, 
                         use_groq=not self.has_gpu
@@ -179,6 +178,10 @@ class VoiceAgent:
                     async for sentence in self._buffer_sentences(word_stream):
                         if self.is_interrupted:
                             break
+                            
+                        # --- NEW: Send AI Text to UI ---
+                        await websocket.send_text(json.dumps({"type": "ai", "text": sentence}))
+                        
                         await self.tts_queue.put(sentence)
 
         finally:
@@ -195,7 +198,6 @@ class VoiceAgent:
                 break
             
             buffer += word
-            # Laptop tweak: Piper handles shorter sentences faster than XTTS
             max_len = 40 if self.has_gpu else 30
             
             if any(buffer.endswith(p) for p in SENTENCE_END) or len(buffer) > max_len:
@@ -213,8 +215,6 @@ class VoiceAgent:
                 if self.is_interrupted:
                     continue
                 
-                # On Laptop: Uses Piper .exe
-                # On PC: Uses Local XTTS
                 async for audio_chunk in self.tts.generate_audio_stream(
                     sentence, 
                     use_piper=not self.has_gpu

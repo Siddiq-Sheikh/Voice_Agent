@@ -1,36 +1,42 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+       
     <meta charset="UTF-8">
+       
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice AI Agent</title>
-    
+        <title>Voice AI Agent</title>
+
+       
     <link rel="icon" href="data:,">
-    
-    <style>
+
+        <style>
         :root {
             /* Cyberpunk Palette */
-            --bg-color: #050a12; /* Deep blackish blue void */
-            --neon-blue: #00f2fe; /* Active listening state */
-            --neon-glow: #4facfe; /* Blue shadow glow */
-            --neon-red: #ff0055;  /* Error state */
-            --dark-ring: #1a2a40; /* Base idle state */
-            --pure-white: #ffffff; /* Hover and AI speaking state */
+            --bg-color: #050a12;
+            --neon-blue: #00f2fe;
+            --neon-glow: #4facfe;
+            --neon-red: #ff0055;
+            --dark-ring: #1a2a40;
+            --pure-white: #ffffff;
         }
 
-        body { 
-            font-family: system-ui, sans-serif; 
-            display: flex; 
-            align-items: center; 
-            justify-content: center; 
-            height: 100vh; 
+        body {
+            font-family: system-ui, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
             margin: 0;
-            background-color: var(--bg-color); 
+            background-color: var(--bg-color);
             overflow: hidden;
+            gap: 40px;
         }
 
-        /* The Round Mic Button Container (Bigger!) */
-        #talkBtn { 
+        /* --- THE MIC BUTTON --- */
+        #talkBtn {
             position: relative;
             width: 150px;
             height: 150px;
@@ -45,9 +51,9 @@
             justify-content: center;
             padding: 0;
             box-sizing: border-box;
-            
-            /* Basic idle glow */
             box-shadow: 0 0 15px rgba(26, 42, 64, 0.5), inset 0 0 10px rgba(26, 42, 64, 0.3);
+            flex-shrink: 0;
+            z-index: 10;
         }
 
         #talkBtn:disabled {
@@ -55,7 +61,6 @@
             cursor: not-allowed;
         }
 
-        /* Bigger SVG Icon */
         #micIcon {
             width: 70px;
             height: 70px;
@@ -63,61 +68,166 @@
             transition: all 0.3s ease;
         }
 
-        /* --- STATE 1: Hover (Pure White) --- */
+        /* Hover */
         #talkBtn:not(.active):not(.error):not(:disabled):hover {
             border-color: var(--pure-white);
             box-shadow: 0 0 25px var(--pure-white), inset 0 0 15px var(--pure-white);
         }
+
         #talkBtn:not(.active):not(.error):not(:disabled):hover #micIcon {
             fill: var(--pure-white);
             filter: drop-shadow(0 0 8px var(--pure-white));
         }
 
-        /* --- STATE 2: Connection Active (Neon Blue) --- */
+        /* Active */
         #talkBtn.active {
             border-color: var(--neon-blue);
             box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow);
         }
+
         #talkBtn.active #micIcon {
             fill: var(--neon-blue);
             filter: drop-shadow(0 0 8px var(--neon-blue));
         }
 
-        /* --- STATE 3: Error (Neon Red) --- */
+        /* Error */
         #talkBtn.error {
             border-color: var(--neon-red);
             box-shadow: 0 0 30px var(--neon-red), inset 0 0 15px var(--neon-red);
         }
+
         #talkBtn.error #micIcon {
             fill: var(--neon-red);
             filter: drop-shadow(0 0 8px var(--neon-red));
         }
 
-        /* --- STATE 4: Glowing when AI Speaks (Pulsating Blue/White) --- */
+        /* AI Speaking */
         #talkBtn.glowing {
             animation: neonPulse 1.5s infinite;
         }
+
         @keyframes neonPulse {
-            0% { border-color: var(--neon-blue); box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow); }
-            50% { border-color: var(--pure-white); box-shadow: 0 0 60px var(--pure-white), inset 0 0 30px var(--pure-white); }
-            100% { border-color: var(--neon-blue); box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow); }
+            0% {
+                border-color: var(--neon-blue);
+                box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow);
+            }
+
+            50% {
+                border-color: var(--pure-white);
+                box-shadow: 0 0 60px var(--pure-white), inset 0 0 30px var(--pure-white);
+            }
+
+            100% {
+                border-color: var(--neon-blue);
+                box-shadow: 0 0 30px var(--neon-glow), inset 0 0 15px var(--neon-glow);
+            }
         }
+
         #talkBtn.glowing #micIcon {
             fill: var(--pure-white);
             filter: drop-shadow(0 0 15px var(--pure-white));
         }
 
+        /* --- THE CHAT UI --- */
+        #chatContainer {
+            width: 95%;
+            max-width: 900px;
+            height: 450px;
+            background: transparent;
+            border: none;
+            padding: 40px 20px 20px 20px;
+            /* Extra top padding so messages don't spawn inside the invisible fade zone */
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+            box-shadow: none;
+            scroll-behavior: smooth;
+
+            /* The Magic Top Fade Effect */
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 100%);
+        }
+
+        /* Custom Scrollbar for Chat */
+        #chatContainer::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #chatContainer::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #chatContainer::-webkit-scrollbar-thumb {
+            background: rgba(26, 42, 64, 0.5);
+            border-radius: 10px;
+        }
+
+        .message {
+            padding: 14px 24px;
+            /* Slightly thicker padding for the bubbly feel */
+            border-radius: 24px;
+            /* True pill/bubble shape */
+            max-width: 75%;
+            /* Tighter width keeps bubbles looking proportional */
+            font-size: 16px;
+            line-height: 1.5;
+            word-wrap: break-word;
+            opacity: 0;
+            animation: fadeIn 0.4s ease-out forwards;
+            letter-spacing: 0.3px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+            /* Lift off background */
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: rgba(0, 242, 254, 0.1);
+            border: 1px solid rgba(0, 242, 254, 0.3);
+            color: var(--pure-white);
+            border-bottom-right-radius: 4px;
+            /* The sharp user tail */
+        }
+
+        .message.ai {
+            align-self: flex-start;
+            background: rgba(26, 42, 64, 0.5);
+            border: 1px solid rgba(42, 64, 96, 0.6);
+            color: #d1e8ff;
+            border-bottom-left-radius: 4px;
+            /* The sharp AI tail */
+        }
     </style>
 </head>
+
 <body>
 
-    <button id="talkBtn">
-        <svg id="micIcon" viewBox="0 0 24 24">
-            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        <button id="talkBtn">
+                <svg id="micIcon" viewBox="0 0 24 24">
+                       
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+                       
+            <path                
+                d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+                   
         </svg>
-    </button>
+            </button>
 
+        <div id="chatContainer"></div>
+
+       
     <script>
         let ws;
         let audioContext;
@@ -128,11 +238,11 @@
         let nextPlayTime = 0;
 
         const btn = document.getElementById('talkBtn');
+        const chatContainer = document.getElementById('chatContainer');
 
         btn.addEventListener('click', async () => {
-            // Remove error state if user tries to reconnect
-            btn.classList.remove("error"); 
-            
+            btn.classList.remove("error");
+
             if (isConnected) {
                 disconnect();
             } else {
@@ -145,34 +255,45 @@
                 btn.disabled = true;
 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-                nextPlayTime = 0; 
+                nextPlayTime = 0;
 
                 ws = new WebSocket("ws://localhost:8000/api/v1/ws/voice");
-                ws.binaryType = "arraybuffer"; 
+                ws.binaryType = "arraybuffer";
 
                 ws.onopen = async () => {
                     isConnected = true;
-                    btn.classList.add("active"); // Turns it Neon Blue!
+                    btn.classList.add("active");
                     btn.disabled = false;
+                    appendMessage("ai", "Connection established. Ready when you are.");
                     await startMicrophone();
                 };
 
                 ws.onmessage = (event) => {
-                    playAudioChunk(event.data);
+                    if (typeof event.data === "string") {
+                        try {
+                            const msg = JSON.parse(event.data);
+                            appendMessage(msg.type, msg.text);
+                        } catch (e) {
+                            console.error("Failed to parse incoming text:", e);
+                        }
+                    }
+                    else if (event.data instanceof ArrayBuffer) {
+                        playAudioChunk(event.data);
+                    }
                 };
 
                 ws.onclose = (event) => {
                     disconnect();
-                    // If the close wasn't a normal user disconnect (code 1000/1001), flash red!
                     if (event.code !== 1000 && event.code !== 1001) {
                         btn.classList.add("error");
+                        appendMessage("ai", "[Connection Lost]");
                     }
                 };
 
             } catch (err) {
                 console.error("Connection failed:", err);
                 disconnect();
-                btn.classList.add("error"); // Turns it Neon Red on failure!
+                btn.classList.add("error");
             }
         }
 
@@ -180,9 +301,9 @@
             try {
                 micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
                 const source = audioContext.createMediaStreamSource(micStream);
-                
+
                 processor = audioContext.createScriptProcessor(2048, 1, 1);
-                
+
                 processor.onaudioprocess = (e) => {
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         const inputData = e.inputBuffer.getChannelData(0);
@@ -200,6 +321,7 @@
                 console.error("Microphone access denied:", err);
                 disconnect();
                 btn.classList.add("error");
+                appendMessage("ai", "[Microphone access denied]");
             }
         }
 
@@ -213,12 +335,11 @@
             source.connect(audioContext.destination);
 
             if (nextPlayTime < audioContext.currentTime) {
-                nextPlayTime = audioContext.currentTime; 
+                nextPlayTime = audioContext.currentTime;
             }
 
             source.start(nextPlayTime);
-            
-            // Visual Glow Logic (AI Speaking)
+
             btn.classList.add("glowing");
 
             const durationMs = audioBuffer.duration * 1000;
@@ -232,20 +353,42 @@
             nextPlayTime += audioBuffer.duration;
         }
 
+        function appendMessage(type, text) {
+            if (type === "ai") {
+                const lastMsg = chatContainer.lastElementChild;
+                if (lastMsg && lastMsg.classList.contains("ai")) {
+                    lastMsg.innerText += (lastMsg.innerText === "" ? "" : " ") + text;
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                    return;
+                }
+            }
+
+            const msgDiv = document.createElement("div");
+            msgDiv.classList.add("message", type);
+            msgDiv.innerText = text;
+            chatContainer.appendChild(msgDiv);
+
+            // Give the DOM a tiny fraction of a second to render the bubble before forcing the scroll down
+            setTimeout(() => {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }, 10);
+        }
+
         function disconnect() {
             clearTimeout(glowTimeout);
             btn.classList.remove("glowing");
             btn.classList.remove("active");
 
-            if (ws) ws.close(1000); // 1000 = Normal closure
+            if (ws) ws.close(1000);
             if (processor) processor.disconnect();
             if (micStream) micStream.getTracks().forEach(track => track.stop());
             if (audioContext && audioContext.state !== 'closed') audioContext.close();
-            
+
             isConnected = false;
-            nextPlayTime = 0; 
+            nextPlayTime = 0;
             btn.disabled = false;
         }
     </script>
 </body>
+
 </html>

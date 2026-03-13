@@ -161,7 +161,7 @@ class LLMService:
         
         # Groq Setup for Laptop Mode
         self.groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-        self.groq_model = "qwen-2.5-7b-32k" # Optimized Qwen 7B on Groq
+        self.groq_model = "llama-3.1-8b-instant"
 
         self.db_schema = """
         Table: users (id, name, email, status)

@@ -205,10 +205,9 @@ class STTService:
             print(">> [STT] Laptop mode. Local Whisper engine skipped (using Groq Cloud).")
 
         # 2. Laptop Mode: Groq Setup
-        # Make sure GROQ_API_KEY is in your .env or Environment Variables
         self.groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-        # 3. VAD SETUP (Silero VAD is light enough for Laptop CPU)
+        # 3. VAD SETUP
         self.vad_model_path = "assets/silero_vad.onnx"
         if not os.path.exists(self.vad_model_path):
             print(f">> ❌ [VAD ERROR] Missing: {self.vad_model_path}")
@@ -237,7 +236,7 @@ class STTService:
         silence_counter = 0
         sr_tensor = np.array(16000, dtype=np.int64)
         
-        print(">> 🟢 STT VAD Worker Active.")
+        print(">> 🟢 STT VAD Worker Active. Waiting for speech...")
         
         while self.is_listening:
             try:
@@ -257,8 +256,10 @@ class STTService:
                 prob_val = float(np.max(out))
                 self._vad_context = chunk_with_context[:, -64:]
                 
-                if prob_val > 0.85 and current_volume > 0.2: 
+                # --- THE FIX: LOWERED THRESHOLDS SO IT HEARS YOU ---
+                if prob_val > 0.60 and current_volume > 0.02: 
                     if not is_recording:
+                        print(">> [VAD] 🎤 Speech detected! Recording...")
                         is_recording = True
                         recording_buffer = list(pre_speech_buffer)
                     recording_buffer.append(raw_bytes)
@@ -267,7 +268,10 @@ class STTService:
                     if is_recording:
                         recording_buffer.append(raw_bytes)
                         silence_counter += 1
+                        
+                        # Wait for ~0.6 seconds of silence before cutting off
                         if silence_counter > 20: 
+                            print(">> [VAD] 🛑 Silence detected. Sending to Groq...")
                             is_recording = False
                             if not self.is_paused:
                                 self.audio_queue.put(b"".join(recording_buffer))
@@ -291,6 +295,7 @@ class STTService:
             
         if not self.audio_queue.empty():
             full_audio_bytes = self.audio_queue.get()
+            
             # Force Groq if no GPU model is available
             if use_groq or not self.has_gpu:
                 return await asyncio.to_thread(self._run_groq_transcription, full_audio_bytes)
@@ -308,13 +313,13 @@ class STTService:
                 wf.writeframes(raw_bytes)
             buffer.seek(0)
 
+            # --- THE FIX: Safer Groq API extraction ---
             transcription = self.groq_client.audio.transcriptions.create(
                 file=("audio.wav", buffer.read()),
                 model="whisper-large-v3",
-                response_format="text",
                 language="en"
             )
-            return self._filter_ghosts(transcription)
+            return self._filter_ghosts(transcription.text)
         except Exception as e:
             print(f">> [Groq STT Error]: {e}")
             return ""
@@ -328,7 +333,7 @@ class STTService:
 
     def _filter_ghosts(self, text: str) -> str:
         clean_text = text.lower().strip(" .!?*-_")
-        ghosts = ["you", "bye", "thanks", "thank you", "amara.org"]
+        ghosts = ["you", "bye", "thanks", "thank you", "amara.org", "blank_audio"]
         if clean_text in ghosts or (clean_text.startswith("[") and clean_text.endswith("]")):
             return ""
         return text
