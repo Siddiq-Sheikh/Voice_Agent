@@ -8,11 +8,12 @@ from TTS.tts.configs.xtts_config import XttsConfig
 from TTS.tts.models.xtts import Xtts
 from huggingface_hub import snapshot_download
 
+
 class TTSService:
     def __init__(self, speaker_wav_path: str = "assets/speaker_ref.wav"):
-        print("\n" + "="*55 + "\n 🗣️  BOOTING XTTS V2 ENGINE \n" + "="*55)
+        print("\n" + "=" * 55 + "\n 🗣️  BOOTING XTTS V2 ENGINE \n" + "=" * 55)
         start_init = time.perf_counter()
-        
+
         # 1. Download/Locate Model
         print(">> [TTS] Locating XTTS v2 checkpoint...")
         model_path = os.path.join(os.getcwd(), "xtts_model")
@@ -25,21 +26,21 @@ class TTSService:
         config.load_json(os.path.join(model_path, "config.json"))
         self.model = Xtts.init_from_config(config)
         self.model.load_checkpoint(
-            config, 
-            checkpoint_dir=model_path, 
-            eval=True, 
+            config,
+            checkpoint_dir=model_path,
+            eval=True,
             use_deepspeed=False
         )
-        
+
         # Move to GPU
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
-            
+
         self.sample_rate = 24000
 
         # 3. Extract and Cache Speaker Latents
         print(f">> [TTS] Caching speaker latents from {speaker_wav_path}...")
-        
+
         if not os.path.exists(speaker_wav_path):
             print(f">> [TTS] ⚠️ No speaker reference found at {speaker_wav_path}!")
             print(">> [TTS] Downloading a default female voice (LJSpeech)...")
@@ -47,7 +48,7 @@ class TTSService:
             sample_url = "https://github.com/coqui-ai/TTS/raw/dev/tests/data/ljspeech/wavs/LJ001-0001.wav"
             urllib.request.urlretrieve(sample_url, speaker_wav_path)
             print(">> [TTS] Default speaker_ref.wav downloaded successfully!")
-            
+
         # Extract latents natively
         self.gpt_cond_latent, self.speaker_embedding = self.model.get_conditioning_latents(
             audio_path=[speaker_wav_path]
@@ -72,11 +73,13 @@ class TTSService:
             self.speaker_embedding,
             enable_text_splitting=False
         )
+
         for _ in chunks:
-            pass 
+            pass
 
     async def generate_audio_stream(self, text: str):
-        if not text.strip(): return
+        if not text.strip():
+            return
 
         start_gen = time.perf_counter()
         first_chunk = True
@@ -87,7 +90,7 @@ class TTSService:
                 language="en",
                 gpt_cond_latent=self.gpt_cond_latent,
                 speaker_embedding=self.speaker_embedding,
-                enable_text_splitting=False 
+                enable_text_splitting=False
             )
 
             for chunk in stream:
@@ -98,7 +101,7 @@ class TTSService:
 
                 audio_np = chunk.cpu().numpy().astype(np.float32)
                 yield audio_np.tobytes()
-                
+
                 await asyncio.sleep(0)
 
             total_time = (time.perf_counter() - start_gen) * 1000

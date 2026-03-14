@@ -81,7 +81,7 @@ class STTService:
                 self._vad_context = chunk_with_context[:, -64:]
                 
                 # --- YOUR EXACT DUAL-GATE (0.85 Prob / 0.4 Vol) ---
-                if prob_val > 0.85 and current_volume > 0.3: 
+                if prob_val > 0.85 and current_volume > 0.1: 
                     if not is_recording:
                         is_recording = True
                         recording_buffer = list(pre_speech_buffer)
@@ -140,7 +140,23 @@ class STTService:
         t_format = (time.perf_counter() - t_format_start) * 1000
         
         t_transcribe_start = time.perf_counter()
-        segments, _ = self.model.transcribe(audio_array, beam_size=5, language="en")
+        
+        # --- THE TRANSLATION FIX ---
+        # 1. Remove language="en" so it auto-detects the spoken language
+        # 2. Add task="translate" so it automatically converts Arabic to English
+        # 3. Capture the 'info' object to check what language it heard
+        segments, info = self.model.transcribe(
+            audio_array, 
+            beam_size=5, 
+            task="translate" 
+        )
+        
+        # --- THE LANGUAGE FILTER ---
+        # If the detected language is not English ("en") or Arabic ("ar"), ignore it completely.
+        if info.language not in ["en", "ar"]:
+            print(f">> [STT] Ignored unsupported language: {info.language}")
+            return ""
+
         t_transcribe = (time.perf_counter() - t_transcribe_start) * 1000
         
         t_process_start = time.perf_counter()
@@ -168,7 +184,7 @@ class STTService:
         
         if text:
             print(f"\n   [STT Latency] Format: {t_format:.2f}ms | Transcribe: {t_transcribe:.2f}ms | Filter: {t_process:.2f}ms | Total: {total_time:.2f}ms")
-            print(f">> [STT] Recognized: {text}")
+            print(f">> [STT] Detected: {info.language.upper()} -> Translated: {text}")
             return text
             
         return ""

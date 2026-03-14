@@ -42,11 +42,28 @@ class VoiceAgent:
                     print(f"🗣️ You: {user_text}")
                     self.is_interrupted = False
                     
+                    # ---------------------------------------------------------
+                    # --- NEW UI UPDATE 1: SEND USER TEXT TO CHATBOX ---
+                    # ---------------------------------------------------------
+                    await websocket.send_json({
+                        "type": "user", 
+                        "text": user_text
+                    })
+                    
                     # 3. Stream LLM -> Sentence Buffer -> TTS Queue
                     word_stream = self.llm.generate_response_stream(user_text)
                     async for sentence in self._buffer_sentences(word_stream):
                         if self.is_interrupted:
                             break
+                            
+                        # ---------------------------------------------------------
+                        # --- NEW UI UPDATE 2: SEND AI TEXT TO CHATBOX ---
+                        # ---------------------------------------------------------
+                        await websocket.send_json({
+                            "type": "ai", 
+                            "text": sentence
+                        })
+                        
                         await self.tts_queue.put(sentence)
 
         finally:
