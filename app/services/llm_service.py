@@ -245,7 +245,8 @@ class LLMService:
 
     async def generate_response_stream(self, user_text: str, use_groq: bool = False):
         # 1. RAG Intercept
-        sql_query = await self._generate_sql(user_text, use_groq=use_groq)
+        # sql_query = await self._generate_sql(user_text, use_groq=use_groq)
+        sql_query = "NO"
         
         context_string = ""
         if sql_query.upper() != "NO" and "SELECT" in sql_query.upper():

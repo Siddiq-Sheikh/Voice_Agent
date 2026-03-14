@@ -459,7 +459,7 @@ class STTService:
                 self._vad_context = chunk_with_context[:, -64:]
                 
                 # --- YOUR EXACT DUAL-GATE (0.85 Prob / 0.4 Vol) ---
-                if prob_val > 0.85 and current_volume > 0.1: 
+                if prob_val > 0.85 and current_volume > 0.02: 
                     if not is_recording:
                         is_recording = True
                         recording_buffer = list(pre_speech_buffer)
