@@ -159,47 +159,69 @@ class LLMService:
         self.model = model_name
         self.ollama_url = "http://localhost:11434/api/chat"
         
-        # Groq Setup for Laptop Mode
         self.groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
         self.groq_model = "llama-3.1-8b-instant"
 
+        # --- THE FIX: The exact schema matching your database ---
         self.db_schema = """
-        Table: users (id, name, email, status)
-        Table: orders (id, user_id, amount, date)
+        Table: employees (id, name, department, role, salary, hire_date)
         """
         
+        # --- THE FIX: Anti-Hallucination Guardrails ---
         self.system_prompt = system_prompt or (
             "You are a highly advanced, conversational voice assistant. "
             "Your responses are being processed directly by a Text-to-Speech engine. "
-            "CRITICAL: No markdown, no asterisks, no lists. Keep sentences short and punchy. "
-            "Say 'percent' for %, 'dollars' for $. Summarize RAG data naturally."
+            "CRITICAL RULES: "
+            "1. No markdown, no asterisks, no lists. Keep sentences short and punchy. "
+            "2. Say 'percent' for %, 'dollars' for $. "
+            "3. If database results are provided in a [SYSTEM NOTE], answer ONLY using that exact data. "
+            "4. If no database results are provided, DO NOT make up data, names, or numbers. Simply state that you don't have that information."
         )
         
         self.chat_history = [{"role": "system", "content": self.system_prompt}]
 
     async def _generate_sql(self, user_text: str, use_groq: bool = False) -> str:
-        """Translates English to SQL using either Ollama or Groq."""
+        """Translates English to SQL using context from recent chat history."""
+        
+        # 1. Grab the last 4 messages from history (ignoring the giant system prompt)
+        recent_history = ""
+        for msg in self.chat_history[-4:]:
+            if msg["role"] != "system":
+                # We strip out the old [SYSTEM NOTE] database injections so the router doesn't get confused
+                clean_content = msg["content"].split("\n\n[SYSTEM NOTE")[0]
+                recent_history += f"{msg['role'].capitalize()}: '{clean_content}'\n"
+
+        # 2. Inject that history into the router's brain
         sql_prompt = (
-            f"Given this PostgreSQL schema:\n{self.db_schema}\n\n"
-            f"User asked: '{user_text}'\n"
-            f"Reply ONLY with a raw PostgreSQL SELECT query or 'NO'."
+            f"You are a strict database router. Decide if the user's latest message requires a database query.\n"
+            f"Schema:\n{self.db_schema}\n\n"
+            f"Recent Conversation Context:\n{recent_history}\n"
+            f"Rules:\n"
+            f"1. If the user asks about data in the schema, reply with ONLY a valid PostgreSQL SELECT query.\n"
+            f"2. Use the 'Recent Conversation Context' to figure out who or what they are referring to if they use words like 'he', 'she', or 'that'.\n"
+            f"3. If they are just chatting normally, reply with exactly the word: NO\n"
+            f"4. Do not add markdown blocks (```sql).\n"
+            f"5. STT makes spelling mistakes. ALWAYS use ILIKE '%keyword%' instead of '=' for text/name columns.\n\n"
+            f"Examples:\n"
+            f"User: 'Hi there!'\nAI: NO\n"
+            f"User: 'When was Marcus hired?'\nAI: SELECT hire_date FROM employees WHERE name ILIKE '%Marcus%';\n\n"
+            f"User's Latest Message: '{user_text}'\nAI: "
         )
+        
+        raw_response = "NO"
         
         if use_groq:
             try:
-                # Laptop Mode: Groq SQL Generation
                 response = await asyncio.to_thread(
                     self.groq_client.chat.completions.create,
-                    model="llama-3.3-70b-versatile", # Using a smarter model for SQL accuracy
+                    model="llama-3.3-70b-versatile", 
                     messages=[{"role": "user", "content": sql_prompt}],
                     temperature=0.0
                 )
-                return response.choices[0].message.content.strip()
+                raw_response = response.choices[0].message.content.strip()
             except Exception as e:
                 print(f">> [Groq SQL Error]: {e}")
-                return "NO"
         else:
-            # PC Mode: Ollama SQL Generation
             payload = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": sql_prompt}],
@@ -209,10 +231,17 @@ class LLMService:
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(self.ollama_url, json=payload, timeout=5.0)
-                    return response.json()["message"]["content"].strip()
+                    raw_response = response.json()["message"]["content"].strip()
             except Exception as e:
                 print(f">> [Ollama SQL Error]: {e}")
-                return "NO"
+
+        # Sanitize the output
+        clean_sql = raw_response.replace("```sql", "").replace("```", "").strip()
+        
+        if clean_sql != "NO":
+            print(f">> [DB ROUTER] Query Generated: {clean_sql}")
+            
+        return clean_sql
 
     async def generate_response_stream(self, user_text: str, use_groq: bool = False):
         # 1. RAG Intercept
