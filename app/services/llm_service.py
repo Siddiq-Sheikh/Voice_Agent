@@ -110,14 +110,22 @@ class LLMService:
         return clean_sql
 
     async def generate_response_stream(self, user_text: str, use_groq: bool = False):
-        # 1. RAG Intercept
-        # sql_query = await self._generate_sql(user_text, use_groq=use_groq)
-        sql_query = "NO"
+        # 1. RAG Intercept (Uncommented the router so it actually runs!)
+        sql_query = await self._generate_sql(user_text, use_groq=use_groq)
         
         context_string = ""
         if sql_query.upper() != "NO" and "SELECT" in sql_query.upper():
             db_results = await self.db.execute_query(sql_query)
-            context_string = f"\n\n[SYSTEM NOTE: Database results: {db_results}. Summarize naturally.]"
+            
+            # --- THE FIX: Strongly worded context injection ---
+            context_string = (
+                f"\n\n--- BACKGROUND DATABASE RESULTS ---\n"
+                f"{db_results}\n"
+                f"-----------------------------------\n"
+                f"INSTRUCTION: Summarize the above data conversationally. "
+                f"NEVER say 'System Note', 'Background Data', or read the raw list format. "
+                f"Just give the answer naturally."
+            )
 
         prompt_with_context = user_text + context_string
         self.chat_history.append({"role": "user", "content": prompt_with_context})
