@@ -168,6 +168,16 @@ class LLMService:
         """
         
         # --- THE FIX: Anti-Hallucination Guardrails ---
+        # self.system_prompt = system_prompt or (
+        #     "You are a highly advanced, conversational voice assistant. "
+        #     "Your responses are being processed directly by a Text-to-Speech engine. "
+        #     "CRITICAL RULES: "
+        #     "1. No markdown, no asterisks, no lists. Keep sentences short and punchy. "
+        #     "2. Say 'percent' for %, 'dollars' for $. "
+        #     "3. If database results are provided in a [SYSTEM NOTE], answer ONLY using that exact data. "
+        #     "4. If no database results are provided, DO NOT make up data, names, or numbers. Simply state that you don't have that information."
+        # )
+
         self.system_prompt = system_prompt or (
             "You are a highly advanced, conversational voice assistant. "
             "Your responses are being processed directly by a Text-to-Speech engine. "
@@ -175,7 +185,9 @@ class LLMService:
             "1. No markdown, no asterisks, no lists. Keep sentences short and punchy. "
             "2. Say 'percent' for %, 'dollars' for $. "
             "3. If database results are provided in a [SYSTEM NOTE], answer ONLY using that exact data. "
-            "4. If no database results are provided, DO NOT make up data, names, or numbers. Simply state that you don't have that information."
+            "4. If the user asks for trends, comparisons, breakdowns, or history, generate a visual chart by appending a STRICT JSON block at the VERY END of your response. "
+            "CHART FORMAT: <CHART>{\"type\": \"bar\", \"title\": \"Salary by Department\", \"labels\": [\"Engineering\", \"HR\"], \"values\": [150000, 95000]}</CHART>\n"
+            "Supported chart types: 'bar', 'line', 'pie', 'doughnut'."
         )
         
         self.chat_history = [{"role": "system", "content": self.system_prompt}]

@@ -1,125 +1,7 @@
-# import asyncio
-# import time
-# from typing import AsyncGenerator
-# from app.core.config import settings
-
-# class VoiceAgent:
-#     def __init__(self, stt, llm, tts):
-#         # 1. CORE AI ENGINES (Injected from lifespan)
-#         self.stt = stt
-#         self.llm = llm
-#         self.tts = tts
-
-#         # --- GLOBAL FLAGS ---
-#         self.allow_interrupt = True   
-#         self.is_interrupted = False 
-#         self.is_speaking = False 
-        
-#         # --- ASYNC QUEUE SYSTEM ---
-#         # Replacing Threaded Queues with Asyncio Queues for FastAPI compatibility
-#         self.tts_queue = asyncio.Queue()          
-#         self.audio_out_queue = asyncio.Queue()  
-
-#     async def start_session(self, websocket):
-#         """Main entry point for a WebSocket connection."""
-#         # Start the background workers as tasks
-#         tts_worker = asyncio.create_task(self._tts_worker())
-#         playback_worker = asyncio.create_task(self._playback_worker(websocket))
-
-#         try:
-#             # Main Loop: Listen for incoming audio bytes from WebSocket
-#             async for message in websocket.iter_bytes():
-#                 # 1. Handle "Barge-in" (Interrupt logic)
-#                 if self.is_speaking and self.allow_interrupt:
-#                     # Logic to detect voice in the incoming stream would go here
-#                     # For now, we'll assume the STT service handles VAD
-#                     await self.interrupt_agent()
-
-#                 # 2. Feed STT
-#                 user_text = await self.stt.transcribe_chunk(message)
-                
-#                 if user_text:
-#                     print(f"🗣️ You: {user_text}")
-#                     self.is_interrupted = False
-                    
-#                     # 3. Stream LLM -> Sentence Buffer -> TTS Queue
-#                     word_stream = self.llm.generate_response_stream(user_text)
-#                     async for sentence in self._buffer_sentences(word_stream):
-#                         if self.is_interrupted:
-#                             break
-#                         await self.tts_queue.put(sentence)
-
-#         finally:
-#             tts_worker.cancel()
-#             playback_worker.cancel()
-
-#     async def _buffer_sentences(self, word_stream) -> AsyncGenerator[str, None]:
-#         """Chunks LLM stream into clean sentences for XTTS prosody."""
-#         buffer = ""
-#         SENTENCE_END = {'.', '!', '?', '\n'}
-        
-#         async for word in word_stream:
-#             if self.is_interrupted:
-#                 break
-            
-#             buffer += word
-#             if any(buffer.endswith(p) for p in SENTENCE_END) or len(buffer) > 40:
-#                 yield buffer.strip()
-#                 buffer = ""
-        
-#         if buffer.strip():
-#             yield buffer.strip()
-
-#     async def _tts_worker(self):
-#         """Worker 1: Consumes sentences and produces audio chunks via XTTS."""
-#         while True:
-#             sentence = await self.tts_queue.get()
-#             if self.is_interrupted:
-#                 self.tts_queue.task_done()
-#                 continue
-            
-#             # XTTS Streaming Inference
-#             async for audio_chunk in self.tts.generate_audio_stream(sentence):
-#                 if self.is_interrupted:
-#                     break
-#                 await self.audio_out_queue.put(audio_chunk)
-            
-#             self.tts_queue.task_done()
-
-#     async def _playback_worker(self, websocket):
-#         """Worker 2: Consumes audio chunks and sends them over WebSocket."""
-#         while True:
-#             audio_data = await self.audio_out_queue.get()
-            
-#             if not self.is_interrupted:
-#                 self.is_speaking = True
-#                 # Send raw PCM or encoded Opus bytes to client
-#                 await websocket.send_bytes(audio_data)
-            
-#             self.audio_out_queue.task_done()
-            
-#             # Check if we are done speaking
-#             if self.audio_out_queue.empty() and self.tts_queue.empty():
-#                 self.is_speaking = False
-
-#     async def interrupt_agent(self):
-#         """Clears all queues and stops current playback immediately."""
-#         print("\n🛑 [Barge-in Detected! Killing Audio]")
-#         self.is_interrupted = True
-#         self.is_speaking = False
-        
-#         # Drain queues
-#         while not self.tts_queue.empty():
-#             self.tts_queue.get_nowait()
-#             self.tts_queue.task_done()
-            
-#         while not self.audio_out_queue.empty():
-#             self.audio_out_queue.get_nowait()
-#             self.audio_out_queue.task_done()
 import asyncio
 import time
 import torch
-import json # <-- Added for UI communication
+import json
 from typing import AsyncGenerator
 from app.core.config import settings
 
@@ -164,7 +46,7 @@ class VoiceAgent:
                     
                     print(f"🗣️ You: {user_text}")
                     
-                    # --- NEW: Send User Text to UI ---
+                    # Send User Text to UI
                     await websocket.send_text(json.dumps({"type": "user", "text": user_text}))
                     
                     self.is_interrupted = False
@@ -175,14 +57,57 @@ class VoiceAgent:
                         use_groq=not self.has_gpu
                     )
                     
+                    # --- THE CHART INTERCEPTOR LOGIC ---
+                    is_chart_mode = False
+                    chart_buffer = ""
+                    
                     async for sentence in self._buffer_sentences(word_stream):
                         if self.is_interrupted:
                             break
                             
-                        # --- NEW: Send AI Text to UI ---
-                        await websocket.send_text(json.dumps({"type": "ai", "text": sentence}))
-                        
-                        await self.tts_queue.put(sentence)
+                        # If we detect the start of a chart...
+                        if "<CHART>" in sentence:
+                            # 1. Split the spoken text from the chart code
+                            parts = sentence.split("<CHART>")
+                            pre_text = parts[0].strip()
+                            
+                            # 2. Send whatever the AI said BEFORE the chart to the UI and TTS!
+                            if pre_text:
+                                await websocket.send_text(json.dumps({"type": "ai", "text": pre_text}))
+                                await self.tts_queue.put(pre_text)
+                                
+                            is_chart_mode = True
+                            chart_buffer = "<CHART>" + parts[1]
+                            
+                        elif is_chart_mode:
+                            # We are actively building the chart JSON
+                            chart_buffer += sentence
+                            
+                            # Check if the chart is completely finished building
+                            if "</CHART>" in chart_buffer:
+                                try:
+                                    clean_json = chart_buffer.split("<CHART>")[1].split("</CHART>")[0].strip()
+                                    clean_json = clean_json.replace("'", '"')
+                                    chart_data = json.loads(clean_json)
+                                    
+                                    print(f"   📊 [System] Generated Chart: {chart_data['title']}")
+                                    
+                                    # Send the chart to the UI
+                                    await websocket.send_text(json.dumps({
+                                        "type": "chart",
+                                        "chartData": chart_data
+                                    }))
+                                except Exception as e:
+                                    print(f"   ❌ [Chart Error] Failed to parse LLM chart JSON: {e}")
+                                
+                                # Reset for the next chart (if any)
+                                is_chart_mode = False
+                                chart_buffer = ""
+                                
+                        else:
+                            # NORMAL MODE: Send text to UI and TTS (Only runs ONCE now!)
+                            await websocket.send_text(json.dumps({"type": "ai", "text": sentence}))
+                            await self.tts_queue.put(sentence)
 
         finally:
             tts_worker.cancel()
