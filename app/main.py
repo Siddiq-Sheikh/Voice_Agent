@@ -5,13 +5,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 # Import Config
-from app.core.config import settings  # Ensure this path is correct for your project
+from app.core.config import settings
 
 # Import Services
 from app.services.stt_service import STTService
 from app.services.llm_service import LLMService
 from app.services.tts_service import TTSService
 from app.services.db_service import DatabaseService 
+# --- NEW IMPORT ---
+from app.services.vision_service import VisionService 
 
 # Import Router
 from app.api.v1.router import api_router
@@ -34,10 +36,12 @@ async def lifespan(app: FastAPI):
     await db.connect()
     models["db"] = db
     
-    # 2. Detect Hardware for AI Services
-    # We pass the device settings or let the services auto-detect as we configured
+    # 2. Detect Hardware and Boot AI Services
     models["tts"] = TTSService()
     models["stt"] = STTService()
+    
+    # --- BOOT VISION SERVICE ---
+    models["vision"] = VisionService()
     
     # 3. Inject the live Database connection into the LLM
     models["llm"] = LLMService(db_service=db)

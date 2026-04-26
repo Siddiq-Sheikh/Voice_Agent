@@ -4,13 +4,16 @@ import torch
 import json
 from typing import AsyncGenerator
 from app.core.config import settings
+from .router import requires_vision 
 
 class VoiceAgent:
-    def __init__(self, stt, llm, tts):
+    # 1. ADD 'vision' TO YOUR INITIALIZER
+    def __init__(self, stt, llm, tts, vision):
         # 1. CORE AI ENGINES
         self.stt = stt
         self.llm = llm
         self.tts = tts
+        self.vision = vision # <-- Save the vision service
 
         # --- DEVICE DETECTION ---
         self.has_gpu = torch.cuda.is_available()
@@ -45,69 +48,79 @@ class VoiceAgent:
                         await self.interrupt_agent()
                     
                     print(f"🗣️ You: {user_text}")
-                    
-                    # Send User Text to UI
                     await websocket.send_text(json.dumps({"type": "user", "text": user_text}))
-                    
                     self.is_interrupted = False
                     
-                    # 2. LLM Generation
-                    word_stream = self.llm.generate_response_stream(
-                        user_text, 
-                        use_groq=not self.has_gpu
-                    )
-                    
-                    # --- THE CHART INTERCEPTOR LOGIC ---
-                    is_chart_mode = False
-                    chart_buffer = ""
-                    
-                    async for sentence in self._buffer_sentences(word_stream):
-                        if self.is_interrupted:
-                            break
+                    # ==========================================
+                    # --- INTENT ROUTER INTERCEPTOR ---
+                    # ==========================================
+                    needs_eyes = await requires_vision(user_text)
+
+                    if needs_eyes:
+                        print(">> [ROUTER] Vision Intent Detected! Snapping screenshot...")
+                        
+                        # 1. Get the screen description
+                        vision_text = await self.vision.describe_screen(custom_prompt=user_text)
+                        
+                        # 2. Send the text straight to the UI and TTS queue
+                        await websocket.send_text(json.dumps({"type": "ai", "text": vision_text}))
+                        if not self.is_interrupted:
+                            await self.tts_queue.put(vision_text)
                             
-                        # If we detect the start of a chart...
-                        if "<CHART>" in sentence:
-                            # 1. Split the spoken text from the chart code
-                            parts = sentence.split("<CHART>")
-                            pre_text = parts[0].strip()
-                            
-                            # 2. Send whatever the AI said BEFORE the chart to the UI and TTS!
-                            if pre_text:
-                                await websocket.send_text(json.dumps({"type": "ai", "text": pre_text}))
-                                await self.tts_queue.put(pre_text)
+                        # 3. Save to LLM memory so it Remembers what it just saw!
+                        self.llm.chat_history.append({"role": "user", "content": user_text})
+                        self.llm.chat_history.append({"role": "assistant", "content": f"[Looking at Screen]: {vision_text}"})
+
+                    else:
+                        print(">> [ROUTER] Normal Chat Intent. Checking Database/Memory...")
+                        
+                        # 2. Standard LLM Generation (Your existing logic)
+                        word_stream = self.llm.generate_response_stream(
+                            user_text, 
+                            use_groq=not self.has_gpu
+                        )
+                        
+                        # --- THE CHART INTERCEPTOR LOGIC ---
+                        is_chart_mode = False
+                        chart_buffer = ""
+                        
+                        async for sentence in self._buffer_sentences(word_stream):
+                            if self.is_interrupted:
+                                break
                                 
-                            is_chart_mode = True
-                            chart_buffer = "<CHART>" + parts[1]
-                            
-                        elif is_chart_mode:
-                            # We are actively building the chart JSON
-                            chart_buffer += sentence
-                            
-                            # Check if the chart is completely finished building
-                            if "</CHART>" in chart_buffer:
-                                try:
-                                    clean_json = chart_buffer.split("<CHART>")[1].split("</CHART>")[0].strip()
-                                    clean_json = clean_json.replace("'", '"')
-                                    chart_data = json.loads(clean_json)
+                            if "<CHART>" in sentence:
+                                parts = sentence.split("<CHART>")
+                                pre_text = parts[0].strip()
+                                
+                                if pre_text:
+                                    await websocket.send_text(json.dumps({"type": "ai", "text": pre_text}))
+                                    await self.tts_queue.put(pre_text)
                                     
-                                    print(f"   📊 [System] Generated Chart: {chart_data['title']}")
+                                is_chart_mode = True
+                                chart_buffer = "<CHART>" + parts[1]
+                                
+                            elif is_chart_mode:
+                                chart_buffer += sentence
+                                if "</CHART>" in chart_buffer:
+                                    try:
+                                        clean_json = chart_buffer.split("<CHART>")[1].split("</CHART>")[0].strip()
+                                        clean_json = clean_json.replace("'", '"')
+                                        chart_data = json.loads(clean_json)
+                                        
+                                        print(f"   📊 [System] Generated Chart: {chart_data['title']}")
+                                        await websocket.send_text(json.dumps({
+                                            "type": "chart",
+                                            "chartData": chart_data
+                                        }))
+                                    except Exception as e:
+                                        print(f"   ❌ [Chart Error] Failed to parse LLM chart JSON: {e}")
                                     
-                                    # Send the chart to the UI
-                                    await websocket.send_text(json.dumps({
-                                        "type": "chart",
-                                        "chartData": chart_data
-                                    }))
-                                except Exception as e:
-                                    print(f"   ❌ [Chart Error] Failed to parse LLM chart JSON: {e}")
-                                
-                                # Reset for the next chart (if any)
-                                is_chart_mode = False
-                                chart_buffer = ""
-                                
-                        else:
-                            # NORMAL MODE: Send text to UI and TTS (Only runs ONCE now!)
-                            await websocket.send_text(json.dumps({"type": "ai", "text": sentence}))
-                            await self.tts_queue.put(sentence)
+                                    is_chart_mode = False
+                                    chart_buffer = ""
+                                    
+                            else:
+                                await websocket.send_text(json.dumps({"type": "ai", "text": sentence}))
+                                await self.tts_queue.put(sentence)
 
         finally:
             tts_worker.cancel()

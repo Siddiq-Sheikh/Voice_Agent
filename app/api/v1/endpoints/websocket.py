@@ -22,15 +22,23 @@ async def voice_websocket_endpoint(websocket: WebSocket):
     stt_service = models.get("stt")
     llm_service = models.get("llm")
     tts_service = models.get("tts")
+    vision_service = models.get("vision") # <-- 1. Extract the vision service
 
     # Guard clause: Ensure the server is actually ready
-    if not all([stt_service, llm_service, tts_service]):
+    # <-- 2. Added vision_service to the check
+    if not all([stt_service, llm_service, tts_service, vision_service]): 
         logger.error(">> [WebSocket] Models are not fully loaded yet.")
         await websocket.close(code=1011, reason="AI engines warming up. Try again in a moment.")
         return
 
     # 2. Instantiate a fresh Agent Orchestrator for this specific session
-    agent = VoiceAgent(stt=stt_service, llm=llm_service, tts=tts_service)
+    # <-- 3. Pass the vision service to the Agent
+    agent = VoiceAgent(
+        stt=stt_service, 
+        llm=llm_service, 
+        tts=tts_service, 
+        vision=vision_service 
+    )
 
     try:
         # 3. Hand over control to the Agent
