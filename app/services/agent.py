@@ -7,92 +7,120 @@ from app.core.config import settings
 from .router import requires_vision 
 
 class VoiceAgent:
-    # 1. ADD 'vision' TO YOUR INITIALIZER
     def __init__(self, stt, llm, tts, vision):
-        # 1. CORE AI ENGINES
         self.stt = stt
         self.llm = llm
         self.tts = tts
-        self.vision = vision # <-- Save the vision service
+        self.vision = vision 
 
-        # --- DEVICE DETECTION ---
         self.has_gpu = torch.cuda.is_available()
-        
-        if self.has_gpu:
-            print(">> [Device] 🖥️ PC detected (GPU available). Using Local XTTS and Local STT.")
-        else:
-            print(">> [Device] 💻 Laptop detected (No GPU). Using Groq (Whisper/Qwen) and Piper EXE.")
-
-        # --- GLOBAL FLAGS ---
         self.allow_interrupt = True   
         self.is_interrupted = False 
         self.is_speaking = False 
         
-        # --- ASYNC QUEUE SYSTEM ---
         self.tts_queue = asyncio.Queue()          
         self.audio_out_queue = asyncio.Queue()  
 
+        mode = "Local AI (GPU)" if self.has_gpu else "Cloud AI (Groq)"
+        print(f"\n>> [SYSTEM] Agent Initialized | Mode: {mode}")
+
     async def start_session(self, websocket):
-        """Main entry point for a WebSocket connection."""
+        print(">> [SYSTEM] WebSocket Connected. Listening...\n")
         tts_worker = asyncio.create_task(self._tts_worker())
         playback_worker = asyncio.create_task(self._playback_worker(websocket))
 
         try:
             async for message in websocket.iter_bytes():
-                # 1. Feed STT 
+                
+                # --- 1. STT SERVICE ---
+                stt_start = time.perf_counter()
                 user_text = await self.stt.transcribe_chunk(message, use_groq=not self.has_gpu)
+                stt_time = (time.perf_counter() - stt_start) * 1000
                 
                 if user_text:
-                    # Handle Barge-in
                     if self.is_speaking and self.allow_interrupt:
                         await self.interrupt_agent()
                     
-                    print(f"🗣️ You: {user_text}")
-                    await websocket.send_text(json.dumps({"type": "user", "text": user_text}))
                     self.is_interrupted = False
+                    print(f"\n🎤 [STT] '{user_text}' ({stt_time:.2f}ms)")
+                    await websocket.send_text(json.dumps({"type": "user", "text": user_text}))
                     
-                    # ==========================================
-                    # --- INTENT ROUTER INTERCEPTOR ---
-                    # ==========================================
-                    needs_eyes = await requires_vision(user_text)
+                    clean_text = user_text.strip().replace("?", "").replace("!", "").replace(".", "")
+                    word_count = len(clean_text.split())
 
-                    if needs_eyes:
-                        print(">> [ROUTER] Vision Intent Detected! Snapping screenshot...")
-                        
-                        # 1. Get the screen description
+                    # --- 2. ROUTER SERVICE ---
+                    router_start = time.perf_counter()
+                    if word_count >= 3:
+                        intent = await requires_vision(clean_text)
+                    else:
+                        intent = "NO"
+                    router_time = (time.perf_counter() - router_start) * 1000
+                    print(f"🧠 [ROUTER] Intent: {intent} ({router_time:.2f}ms)")
+
+                    # ----------------------------------------------------
+                    # --- PATH A: VISUAL LLM (Graphs, UI, Images) ---
+                    # ----------------------------------------------------
+                    if intent == "VISION_SINGLE":
+                        vlm_start = time.perf_counter()
                         vision_text = await self.vision.describe_screen(custom_prompt=user_text)
+                        vlm_time = (time.perf_counter() - vlm_start) * 1000
                         
-                        # 2. Send the text straight to the UI and TTS queue
+                        print(f"👁️ [VLM] '{vision_text}' ({vlm_time:.2f}ms)")
                         await websocket.send_text(json.dumps({"type": "ai", "text": vision_text}))
+                        
                         if not self.is_interrupted:
                             await self.tts_queue.put(vision_text)
                             
-                        # 3. Save to LLM memory so it Remembers what it just saw!
                         self.llm.chat_history.append({"role": "user", "content": user_text})
                         self.llm.chat_history.append({"role": "assistant", "content": f"[Looking at Screen]: {vision_text}"})
 
+                    # ----------------------------------------------------
+                    # --- PATH B: OCR + TEXT LLM (Code, Documents) ---
+                    # ----------------------------------------------------
                     else:
-                        print(">> [ROUTER] Normal Chat Intent. Checking Database/Memory...")
-                        
-                        # 2. Standard LLM Generation (Your existing logic)
+                        llm_input_prompt = user_text 
+
+                        if intent == "READ_TEXT":
+                            ocr_start = time.perf_counter()
+                            screen_text = await self.vision.extract_text()
+                            ocr_time = (time.perf_counter() - ocr_start) * 1000
+                            print(f"📝 [OCR] Extracted {len(screen_text)} characters ({ocr_time:.2f}ms)")
+                            
+                            llm_input_prompt = (
+                                f"You are analyzing the user's screen. Answer their request using the extracted code/text below.\n\n"
+                                f"--- EXTRACTED SCREEN TEXT ---\n{screen_text}\n---------------------------\n\n"
+                                f"User Request: {user_text}"
+                            )
+                            
+                            self.llm.chat_history.append({"role": "user", "content": user_text})
+                            self.llm.chat_history.append({"role": "assistant", "content": "[System: Scanned screen text via OCR]"})
+
+                        # Execute normal streaming LLM (Chat or OCR Fallthrough)
                         word_stream = self.llm.generate_response_stream(
-                            user_text, 
+                            llm_input_prompt, 
                             use_groq=not self.has_gpu
                         )
                         
-                        # --- THE CHART INTERCEPTOR LOGIC ---
                         is_chart_mode = False
                         chart_buffer = ""
+                        llm_full_response = ""
+                        llm_start = time.perf_counter()
+                        first_chunk_received = False
                         
                         async for sentence in self._buffer_sentences(word_stream):
                             if self.is_interrupted:
                                 break
+                                
+                            if not first_chunk_received:
+                                ttft = (time.perf_counter() - llm_start) * 1000
+                                first_chunk_received = True
                                 
                             if "<CHART>" in sentence:
                                 parts = sentence.split("<CHART>")
                                 pre_text = parts[0].strip()
                                 
                                 if pre_text:
+                                    llm_full_response += pre_text + " "
                                     await websocket.send_text(json.dumps({"type": "ai", "text": pre_text}))
                                     await self.tts_queue.put(pre_text)
                                     
@@ -106,28 +134,33 @@ class VoiceAgent:
                                         clean_json = chart_buffer.split("<CHART>")[1].split("</CHART>")[0].strip()
                                         clean_json = clean_json.replace("'", '"')
                                         chart_data = json.loads(clean_json)
+                                        print(f"📊 [CHART] Generated: '{chart_data.get('title', 'Untitled')}'")
                                         
-                                        print(f"   📊 [System] Generated Chart: {chart_data['title']}")
                                         await websocket.send_text(json.dumps({
                                             "type": "chart",
                                             "chartData": chart_data
                                         }))
                                     except Exception as e:
-                                        print(f"   ❌ [Chart Error] Failed to parse LLM chart JSON: {e}")
+                                        print(f"❌ [CHART ERROR]: {e}")
                                     
                                     is_chart_mode = False
                                     chart_buffer = ""
-                                    
                             else:
+                                llm_full_response += sentence + " "
                                 await websocket.send_text(json.dumps({"type": "ai", "text": sentence}))
                                 await self.tts_queue.put(sentence)
+                                
+                        if not self.is_interrupted and llm_full_response.strip():
+                            print(f"💬 [LLM] '{llm_full_response.strip()}' (TTFT: {ttft:.2f}ms)")
 
+        except Exception as e:
+            print(f">> [SYSTEM] Connection error: {e}")
         finally:
+            print(">> [SYSTEM] WebSocket Closed.")
             tts_worker.cancel()
             playback_worker.cancel()
 
     async def _buffer_sentences(self, word_stream) -> AsyncGenerator[str, None]:
-        """Chunks LLM stream into sentences."""
         buffer = ""
         SENTENCE_END = {'.', '!', '?', '\n'}
         
@@ -146,12 +179,14 @@ class VoiceAgent:
             yield buffer.strip()
 
     async def _tts_worker(self):
-        """Worker 1: Produces audio chunks."""
         while True:
             sentence = await self.tts_queue.get()
             try:
                 if self.is_interrupted:
                     continue
+                
+                tts_start = time.perf_counter()
+                first_audio_yielded = False
                 
                 async for audio_chunk in self.tts.generate_audio_stream(
                     sentence, 
@@ -159,12 +194,17 @@ class VoiceAgent:
                 ):
                     if self.is_interrupted:
                         break
+                        
+                    if not first_audio_yielded:
+                        ttfa = (time.perf_counter() - tts_start) * 1000
+                        print(f"🔊 [TTS] Audio ready (TTFA: {ttfa:.2f}ms)")
+                        first_audio_yielded = True
+                        
                     await self.audio_out_queue.put(audio_chunk)
             finally:
                 self.tts_queue.task_done()
 
     async def _playback_worker(self, websocket):
-        """Worker 2: Sends audio over WebSocket."""
         while True:
             audio_data = await self.audio_out_queue.get()
             try:
@@ -178,8 +218,7 @@ class VoiceAgent:
                 self.audio_out_queue.task_done()
 
     async def interrupt_agent(self):
-        """Clears all queues immediately."""
-        print("\n🛑 [Barge-in] Interrupting...")
+        print("\n🛑 [BARGE-IN] Interrupted.")
         self.is_interrupted = True
         
         while not self.tts_queue.empty():
