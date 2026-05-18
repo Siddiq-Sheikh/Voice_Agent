@@ -21,6 +21,10 @@ class VoiceAgent:
         self.tts_queue = asyncio.Queue()          
         self.audio_out_queue = asyncio.Queue()  
 
+        # TTS timing aggregation
+        self._tts_start_time = None
+        self._tts_sentence_count = 0
+
         mode = "Local AI (GPU)" if self.has_gpu else "Cloud AI (Groq)"
         print(f"\n>> [SYSTEM] Agent Initialized | Mode: {mode}")
 
@@ -185,8 +189,10 @@ class VoiceAgent:
                 if self.is_interrupted:
                     continue
                 
-                tts_start = time.perf_counter()
-                first_audio_yielded = False
+                # Start the global TTS timer on the first sentence
+                if self._tts_start_time is None:
+                    self._tts_start_time = time.perf_counter()
+                self._tts_sentence_count += 1
                 
                 async for audio_chunk in self.tts.generate_audio_stream(
                     sentence, 
@@ -194,12 +200,6 @@ class VoiceAgent:
                 ):
                     if self.is_interrupted:
                         break
-                        
-                    if not first_audio_yielded:
-                        ttfa = (time.perf_counter() - tts_start) * 1000
-                        print(f"🔊 [TTS] Audio ready (TTFA: {ttfa:.2f}ms)")
-                        first_audio_yielded = True
-                        
                     await self.audio_out_queue.put(audio_chunk)
             finally:
                 self.tts_queue.task_done()
@@ -214,6 +214,12 @@ class VoiceAgent:
                 
                 if self.audio_out_queue.empty() and self.tts_queue.empty():
                     self.is_speaking = False
+                    # Print single total TTS latency when fully done
+                    if self._tts_start_time is not None:
+                        total_tts = (time.perf_counter() - self._tts_start_time) * 1000
+                        print(f"🔊 [TTS] Complete ({self._tts_sentence_count} chunks, {total_tts:.0f}ms total)")
+                        self._tts_start_time = None
+                        self._tts_sentence_count = 0
             finally:
                 self.audio_out_queue.task_done()
 

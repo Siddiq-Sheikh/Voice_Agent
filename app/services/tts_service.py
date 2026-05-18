@@ -136,10 +136,6 @@ class TTSService:
                 )
 
                 for chunk in stream:
-                    if first_chunk:
-                        ttfa = (time.perf_counter() - start_gen) * 1000
-                        print(f"   [TTS Latency] TTFA (Streaming): {ttfa:.2f}ms")
-                        first_chunk = False
 
                     # The safety check so it doesn't crash on standard arrays
                     if isinstance(chunk, torch.Tensor):
@@ -149,9 +145,6 @@ class TTSService:
                         
                     yield audio_np.tobytes()
                     await asyncio.sleep(0)
-
-                total_time = (time.perf_counter() - start_gen) * 1000
-                print(f"   [TTS Latency] Synthesis Complete: {total_time:.2f}ms")
 
             except Exception as e:
                 print(f">> [XTTS Error]: {e}")
